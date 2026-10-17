@@ -12,8 +12,11 @@ import {
   X,
   CheckCircle,
   AlertCircle,
-  ArrowRight
+  ArrowRight,
+  Trophy,
+  User
 } from 'lucide-react';
+import { UserStatsManager } from '../utils/userStats.ts';
 
 interface HeaderProps {
   activeTab: string;
@@ -123,6 +126,21 @@ export const Header: React.FC<HeaderProps> = ({
                 <span className="hidden sm:inline">雲端資料夾</span>
                 <span className="sm:hidden">雲端</span>
               </button>
+
+              {/* Active Learner Points Pill */}
+              {UserStatsManager.getCurrentNickname() && UserStatsManager.getCurrentNickname() !== '新進砲手' && (
+                <button
+                  onClick={() => setActiveTab('quiz')}
+                  className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-950/60 border border-amber-800/80 text-xs font-mono text-stone-200 hover:border-amber-600 transition-colors ml-1"
+                  title="點擊進入測考與榮譽榜"
+                >
+                  <Trophy className="w-3.5 h-3.5 text-amber-400" />
+                  <span className="text-stone-300 font-sans">{UserStatsManager.getCurrentNickname()}:</span>
+                  <span className="text-amber-300 font-bold">
+                    {UserStatsManager.getUser(UserStatsManager.getCurrentNickname())?.totalPoints || 0}分
+                  </span>
+                </button>
+              )}
 
               {/* GitHub Pages Deploy Helper Button */}
               <button

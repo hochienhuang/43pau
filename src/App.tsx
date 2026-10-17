@@ -25,9 +25,9 @@ export default function App() {
   const [activeRecitationId, setActiveRecitationId] = useState<string>('squad-formation');
   const [activeOperationId, setActiveOperationId] = useState<string>('gun-drill-duties');
   const [quizConfig, setQuizConfig] = useState<{
-    type?: 'single' | 'multiple' | 'all';
+    type?: 'formal' | 'single' | 'multiple' | 'all';
     count?: number;
-  }>({ type: 'all', count: 20 });
+  }>({ type: 'formal', count: 30 });
 
   const totalQuestions = SINGLE_QUESTIONS.length + MULTIPLE_QUESTIONS.length;
 
@@ -37,7 +37,7 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleStartQuiz = (options: { type: 'single' | 'multiple' | 'all'; count: number }) => {
+  const handleStartQuiz = (options: { type: 'formal' | 'single' | 'multiple' | 'all'; count?: number }) => {
     setQuizConfig(options);
     setActiveTab('quiz');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -129,7 +129,10 @@ export default function App() {
         )}
 
         {activeTab === 'quiz' && (
-          <QuizSection initialConfig={quizConfig} />
+          <QuizSection 
+            initialConfig={quizConfig} 
+            onBack={() => setActiveTab('overview')} 
+          />
         )}
 
         {activeTab === 'flashcards' && (

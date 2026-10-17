@@ -14,12 +14,14 @@ import {
   Target, 
   Wrench, 
   AlertTriangle,
-  Play
+  Play,
+  Medal,
+  Trophy
 } from 'lucide-react';
 
 interface ThemeBubbleGridProps {
   onSelectRecitation: (recitationId: string) => void;
-  onStartQuiz: (options: { type: 'single' | 'multiple' | 'all'; count: number }) => void;
+  onStartQuiz: (options: { type: 'formal' | 'single' | 'multiple' | 'all'; count?: number }) => void;
   onSelectOperation: (opId: string) => void;
   onOpenCloud: () => void;
 }
@@ -106,6 +108,20 @@ export const ThemeBubbleGrid: React.FC<ThemeBubbleGridProps> = ({
     },
 
     // 測驗題庫類
+    {
+      id: 'quiz-formal',
+      category: 'quiz',
+      title: '4-S. 🎖️ 國軍正式考試模擬',
+      subtitle: '20題單選 ＋ 10題複選 隨機抽選',
+      badge: '正式考試 ‧ 嚴格30題驗收',
+      badgeColor: 'bg-gradient-to-r from-amber-500/30 to-amber-600/30 text-amber-200 border-amber-500/60 font-black',
+      icon: Medal,
+      iconBg: 'bg-amber-500/20 text-amber-400 border-amber-500/40 ring-1 ring-amber-500/30',
+      description: '嚴格比照國軍部隊準則測考規格，隨機抽選 20 題單選題 ＋ 10 題複選題（複選題集中於最後 21～30 題，共 30 題），單選 1 分/複選 1.5 分累積點數，自動記錄錯題次數！',
+      points: ['全真抽取 20單選＋10複選（複選集中於最後面）', '單選+1分 複選+1.5分持續累積', '自動記入個人專屬錯題次數'],
+      actionLabel: '開始國軍正式模擬考',
+      onClick: () => onStartQuiz({ type: 'formal', count: 30 })
+    },
     {
       id: 'quiz-single',
       category: 'quiz',
