@@ -1,0 +1,49 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128;
+    }
+
+    function isValidLeaderboardUser(data) {
+      return data.keys().hasAll(['nickname', 'totalPoints', 'totalTestsTaken', 'lastActiveAt'])
+        && data.keys().hasOnly(['nickname', 'totalPoints', 'singleCorrectCount', 'multipleCorrectCount', 'totalTestsTaken', 'formalExamsTaken', 'formalExamsPassed', 'totalWrongQuestionsCount', 'createdAt', 'lastActiveAt'])
+        && data.nickname is string && data.nickname.size() > 0 && data.nickname.size() <= 60
+        && data.totalPoints is number && data.totalPoints >= 0
+        && data.totalTestsTaken is number && data.totalTestsTaken >= 0
+        && data.lastActiveAt is string && data.lastActiveAt.size() <= 40;
+    }
+
+    function isValidTestSubmission(data) {
+      return data.keys().hasAll(['nickname', 'mode', 'scorePercent', 'pointsEarned', 'submittedAt'])
+        && data.keys().hasOnly(['nickname', 'mode', 'modeName', 'scorePercent', 'pointsEarned', 'correctCount', 'totalQuestions', 'submittedAt'])
+        && data.nickname is string && data.nickname.size() > 0 && data.nickname.size() <= 60
+        && data.mode is string && data.mode.size() <= 20
+        && data.scorePercent is number && data.scorePercent >= 0 && data.scorePercent <= 100
+        && data.pointsEarned is number && data.pointsEarned >= 0
+        && data.submittedAt is string && data.submittedAt.size() <= 40;
+    }
+
+    // Public / Shared Leaderboard
+    match /leaderboard/{nickname} {
+      allow read: if true;
+      allow create: if isValidId(nickname) && isValidLeaderboardUser(request.resource.data);
+      allow update: if isValidId(nickname) && isValidLeaderboardUser(request.resource.data)
+        && request.resource.data.nickname == resource.data.nickname;
+      allow delete: if false;
+    }
+
+    // Individual test submission audit log
+    match /testSubmissions/{submissionId} {
+      allow read: if true;
+      allow create: if isValidId(submissionId) && isValidTestSubmission(request.resource.data);
+      allow update, delete: if false;
+    }
+  }
+}

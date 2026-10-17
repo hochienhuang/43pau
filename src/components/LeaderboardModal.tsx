@@ -17,11 +17,19 @@ import {
   Code,
   Copy,
   Check,
-  Users
+  Users,
+  Cloud,
+  CloudUpload,
+  RefreshCw,
+  Database,
+  ExternalLink,
+  ShieldCheck,
+  Zap
 } from 'lucide-react';
 import { UserStatsManager, UserStats, MissedQuestionRecord } from '../utils/userStats.ts';
 import { Question } from '../data/questions.ts';
 import { downloadBlobFile } from '../data/cloudExport.ts';
+import { firebaseSync, FirebaseClientConfig } from '../services/firebase.ts';
 
 interface LeaderboardModalProps {
   isOpen: boolean;
@@ -29,7 +37,7 @@ interface LeaderboardModalProps {
   currentNickname: string;
   onSwitchNickname: (newNickname: string) => void;
   onStartRetest: (questions: Question[]) => void;
-  initialTab?: 'leaderboard' | 'wrongQuestions' | 'jsonView';
+  initialTab?: 'leaderboard' | 'wrongQuestions' | 'jsonView' | 'cloudSync';
 }
 
 export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
@@ -40,18 +48,54 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
   onStartRetest,
   initialTab = 'leaderboard'
 }) => {
-  const [tab, setTab] = useState<'leaderboard' | 'wrongQuestions' | 'jsonView'>(initialTab);
+  const [tab, setTab] = useState<'leaderboard' | 'wrongQuestions' | 'jsonView' | 'cloudSync'>(initialTab);
   const [tempNickname, setTempNickname] = useState<string>('');
   const [isEditingNick, setIsEditingNick] = useState<boolean>(false);
   const [wrongFilter, setWrongFilter] = useState<string>('');
   const [copiedJSON, setCopiedJSON] = useState<boolean>(false);
   const [jsonMode, setJsonMode] = useState<'full' | 'personal'>('full');
+  const [refreshTick, setRefreshTick] = useState<number>(0);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [syncStatusMsg, setSyncStatusMsg] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
+  const [customProjectId, setCustomProjectId] = useState<string>('');
+  const [customConfigText, setCustomConfigText] = useState<string>('');
+  const [showConfigEditor, setShowConfigEditor] = useState<boolean>(false);
+
+  const [firebaseStatus, setFirebaseStatus] = useState(() => firebaseSync.getStatus());
 
   React.useEffect(() => {
     if (initialTab && isOpen) {
       setTab(initialTab);
     }
   }, [initialTab, isOpen]);
+
+  // Subscribe to real-time cloud updates and status changes
+  React.useEffect(() => {
+    if (!isOpen) return;
+
+    const unsubStatus = firebaseSync.onStatusChange((status) => {
+      setFirebaseStatus({
+        ...firebaseSync.getStatus(),
+        ...status
+      });
+    });
+
+    const unsubLeaderboard = firebaseSync.subscribeLeaderboard(() => {
+      // Incoming update from another student's phone! Refresh UI
+      setRefreshTick((t) => t + 1);
+    });
+
+    const currentCfg = firebaseSync.getStoredConfig();
+    if (currentCfg) {
+      setCustomProjectId(currentCfg.projectId || '');
+      setCustomConfigText(JSON.stringify(currentCfg, null, 2));
+    }
+
+    return () => {
+      if (unsubLeaderboard) unsubLeaderboard();
+      unsubStatus();
+    };
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -128,6 +172,60 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
     onStartRetest(questions);
   };
 
+  const handlePushLocalToCloud = async () => {
+    setIsSyncing(true);
+    setSyncStatusMsg({ type: 'info', text: '正在將本機學員紀錄同步上傳至雲端 Firestore...' });
+    try {
+      const res = await firebaseSync.pushAllLocalUsersToCloud();
+      if (res.error) {
+        setSyncStatusMsg({ type: 'error', text: res.error });
+      } else {
+        setSyncStatusMsg({ type: 'success', text: `成功同步 ${res.count} 位學員累積成績至雲端資料庫！全連手機即刻可見。` });
+        setRefreshTick(t => t + 1);
+      }
+    } catch (e: any) {
+      setSyncStatusMsg({ type: 'error', text: `同步失敗: ${e?.message || '請確認網路或 Firebase 權限'}` });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleSaveCustomConfig = () => {
+    try {
+      if (!customConfigText.trim() && !customProjectId.trim()) {
+        firebaseSync.setCustomConfig(null);
+        setFirebaseStatus(firebaseSync.getStatus());
+        setSyncStatusMsg({ type: 'info', text: '已恢復為本機單機模式。' });
+        return;
+      }
+
+      let parsed: FirebaseClientConfig;
+      if (customConfigText.trim().startsWith('{')) {
+        parsed = JSON.parse(customConfigText.trim());
+      } else {
+        parsed = {
+          apiKey: '',
+          projectId: customProjectId.trim(),
+          firestoreDatabaseId: '(default)'
+        };
+      }
+
+      firebaseSync.setCustomConfig(parsed);
+      setFirebaseStatus(firebaseSync.getStatus());
+      setSyncStatusMsg({ type: 'success', text: '已套用 Firebase 雲端設定！正在測試即時連線...' });
+    } catch (e: any) {
+      setSyncStatusMsg({ type: 'error', text: `設定格式錯誤: ${e?.message}` });
+    }
+  };
+
+  const handleResetConfig = () => {
+    firebaseSync.setCustomConfig(null);
+    setCustomProjectId('');
+    setCustomConfigText('');
+    setFirebaseStatus(firebaseSync.getStatus());
+    setSyncStatusMsg({ type: 'info', text: '已清除自訂設定，恢復單機模式' });
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
       <div className="relative w-full max-w-4xl bg-stone-900 border border-stone-700 rounded-3xl shadow-2xl flex flex-col max-h-[92vh] overflow-hidden">
@@ -152,12 +250,27 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
             </div>
           </div>
 
-          <button
-            onClick={onClose}
-            className="p-2 text-stone-400 hover:text-white rounded-xl bg-stone-800 hover:bg-stone-700 transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setTab('cloudSync')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all border ${
+                firebaseStatus.isConnected
+                  ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40 hover:bg-emerald-900'
+                  : 'bg-stone-800 text-stone-300 border-stone-700 hover:bg-stone-750'
+              }`}
+              title="點擊設定全連跨手機即時雲端同步"
+            >
+              <Cloud className={`w-3.5 h-3.5 ${firebaseStatus.isConnected ? 'text-emerald-400 animate-pulse' : 'text-stone-400'}`} />
+              <span>{firebaseStatus.isConnected ? '雲端即時連線中 🟢' : '雲端跨手機同步 ☁️'}</span>
+            </button>
+
+            <button
+              onClick={onClose}
+              className="p-2 text-stone-400 hover:text-white rounded-xl bg-stone-800 hover:bg-stone-700 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Current User Quick Bar & Nickname Switcher */}
@@ -273,6 +386,20 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
             >
               <Code className="w-3.5 h-3.5" />
               <span>JSON 統計與匯出</span>
+            </button>
+            <button
+              onClick={() => setTab('cloudSync')}
+              className={`px-3.5 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1.5 ${
+                tab === 'cloudSync'
+                  ? 'bg-emerald-600 text-white shadow-md'
+                  : 'text-stone-400 hover:bg-stone-800 hover:text-stone-200'
+              }`}
+            >
+              <Cloud className="w-3.5 h-3.5" />
+              <span>跨手機雲端同步</span>
+              {firebaseStatus.isConnected && (
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              )}
             </button>
           </div>
 
@@ -569,6 +696,201 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
                 <pre className="p-4 rounded-2xl bg-stone-950 border border-stone-800 text-xs font-mono text-emerald-400/90 overflow-x-auto max-h-[50vh] scrollbar-thin leading-relaxed">
                   {activeJsonString}
                 </pre>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 4: CLOUD SYNC SETTINGS & MULTI-DEVICE MANAGEMENT */}
+          {tab === 'cloudSync' && (
+            <div className="space-y-6">
+              {/* Notification Banner */}
+              {syncStatusMsg && (
+                <div
+                  className={`p-3.5 rounded-2xl border text-xs flex items-center justify-between gap-2 animate-in fade-in duration-200 ${
+                    syncStatusMsg.type === 'success'
+                      ? 'bg-emerald-950/70 border-emerald-500/60 text-emerald-200'
+                      : syncStatusMsg.type === 'error'
+                      ? 'bg-rose-950/70 border-rose-500/60 text-rose-200'
+                      : 'bg-blue-950/70 border-blue-500/60 text-blue-200'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    {syncStatusMsg.type === 'success' && <CheckCircle className="w-4 h-4 text-emerald-400 flex-shrink-0" />}
+                    {syncStatusMsg.type === 'error' && <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0" />}
+                    {syncStatusMsg.type === 'info' && <RefreshCw className="w-4 h-4 text-blue-400 animate-spin flex-shrink-0" />}
+                    <span>{syncStatusMsg.text}</span>
+                  </div>
+                  <button
+                    onClick={() => setSyncStatusMsg(null)}
+                    className="text-stone-400 hover:text-white p-1"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+
+              {/* Status Header Card */}
+              <div className="rounded-2xl bg-stone-950 border border-stone-800 p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                <div className="flex items-start gap-3.5">
+                  <div
+                    className={`p-3 rounded-2xl border flex-shrink-0 ${
+                      firebaseStatus.isConnected
+                        ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                        : 'bg-stone-850 text-stone-400 border-stone-750'
+                    }`}
+                  >
+                    <Cloud className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h4 className="text-base font-bold text-stone-100">
+                        {firebaseStatus.isConnected
+                          ? 'Firebase 雲端資料庫：即時同步連線中'
+                          : '跨手機連線狀態：目前為單機離線模式'}
+                      </h4>
+                      <span
+                        className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${
+                          firebaseStatus.isConnected
+                            ? 'bg-emerald-950 text-emerald-300 border-emerald-800'
+                            : 'bg-stone-850 text-stone-400 border-stone-700'
+                        }`}
+                      >
+                        {firebaseStatus.isConnected ? 'LIVE ONLINE' : 'STANDALONE'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-stone-400 mt-1 leading-relaxed">
+                      {firebaseStatus.isConnected ? (
+                        <>
+                          全連弟兄只要在任何手機上交卷，積分與排行榜將全自動<strong>即時跨手機連線同步</strong>。
+                          {firebaseStatus.projectId && (
+                            <span className="ml-1 text-emerald-400/90 font-mono">
+                              (專案: {firebaseStatus.projectId})
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        '目前測驗紀錄僅儲存在這台手機的瀏覽器中。設定 Firebase 後即可實現全連手機即時互通！'
+                      )}
+                    </p>
+                    {firebaseStatus.lastSync && (
+                      <div className="text-[11px] text-stone-500 mt-1 font-mono">
+                        最近雲端更新時間：{firebaseStatus.lastSync.toLocaleTimeString()}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 self-stretch md:self-auto justify-end">
+                  <button
+                    onClick={handlePushLocalToCloud}
+                    disabled={isSyncing}
+                    className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-stone-950 font-bold text-xs flex items-center gap-1.5 transition-all shadow-md flex-1 md:flex-initial justify-center"
+                    title="將當前手機所有學員累計點數推送到雲端"
+                  >
+                    <CloudUpload className="w-4 h-4" />
+                    <span>{isSyncing ? '同步中...' : '上傳本機資料至雲端'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Instructions and Firebase Configuration Form */}
+              <div className="rounded-2xl bg-stone-850/60 border border-stone-800 p-5 space-y-4">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2 text-stone-200 font-bold text-sm">
+                    <Database className="w-4 h-4 text-amber-400" />
+                    <span>Firebase 雲端連線設定（連長 / 幹部維護專區）</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowConfigEditor(!showConfigEditor)}
+                    className="text-xs text-amber-400 hover:underline flex items-center gap-1"
+                  >
+                    <span>{showConfigEditor ? '隱藏詳細設定' : '開啟詳細設定表單'}</span>
+                  </button>
+                </div>
+
+                {/* Explanation steps */}
+                <div className="p-4 rounded-xl bg-stone-950/60 border border-stone-800/80 space-y-3 text-xs text-stone-300">
+                  <div className="font-bold text-amber-300 flex items-center gap-1.5">
+                    <Zap className="w-4 h-4 text-amber-400" />
+                    <span>如何在部隊建立完全免費的「全連即時同步排行榜」？（只需 1 分鐘）</span>
+                  </div>
+                  <ol className="list-decimal list-inside space-y-1.5 text-stone-400 leading-relaxed pl-1">
+                    <li>
+                      使用 Google 帳號前往{' '}
+                      <a
+                        href="https://console.firebase.google.com"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-amber-400 underline inline-flex items-center gap-0.5"
+                      >
+                        Firebase 控制台 <ExternalLink className="w-3 h-3 inline" />
+                      </a>
+                      ，點擊「新增專案」（完全免費，無須輸入信用卡）。
+                    </li>
+                    <li>
+                      點擊左側選單的「<strong>Firestore Database</strong>」，點「建立資料庫」，位置選台灣 (asia-east1) 或預設即可。
+                    </li>
+                    <li>
+                      將您建立的<strong>專案 ID (Project ID)</strong> 或網頁設定複製貼到底下，點擊「套用連線」，立刻生效！
+                    </li>
+                  </ol>
+                </div>
+
+                {/* Configuration Input Box */}
+                <div className="space-y-3 pt-2">
+                  <div>
+                    <label className="block text-xs font-bold text-stone-300 mb-1">
+                      Firebase 專案代碼 (Project ID) 或完整設定 JSON：
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="例如：pau-artillery-quiz 或貼上完整 Firebase Config..."
+                      value={customProjectId}
+                      onChange={(e) => {
+                        setCustomProjectId(e.target.value);
+                        if (!customConfigText.startsWith('{')) {
+                          setCustomConfigText(e.target.value);
+                        }
+                      }}
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-stone-950 border border-stone-700 text-xs font-mono text-stone-100 placeholder-stone-600 focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+
+                  {showConfigEditor && (
+                    <div>
+                      <label className="block text-xs font-bold text-stone-300 mb-1">
+                        完整 Web App Configuration JSON（選填，若有 apiKey / appId 可貼此）：
+                      </label>
+                      <textarea
+                        rows={6}
+                        placeholder={`{\n  "apiKey": "AIzaSy...",\n  "projectId": "pau-artillery-quiz",\n  "authDomain": "pau-artillery-quiz.firebaseapp.com"\n}`}
+                        value={customConfigText}
+                        onChange={(e) => setCustomConfigText(e.target.value)}
+                        className="w-full p-3 rounded-xl bg-stone-950 border border-stone-700 text-xs font-mono text-emerald-400 placeholder-stone-600 focus:outline-none focus:border-amber-500"
+                      />
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-2 pt-1 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={handleSaveCustomConfig}
+                      className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 transition-all shadow-md"
+                    >
+                      <CheckCircle className="w-4 h-4" />
+                      <span>套用並儲存設定</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleResetConfig}
+                      className="px-3.5 py-2 rounded-xl bg-stone-800 hover:bg-stone-750 text-stone-400 hover:text-stone-200 text-xs transition-colors"
+                    >
+                      <span>恢復預設（單機模式）</span>
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           )}

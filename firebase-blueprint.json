@@ -1,0 +1,110 @@
+{
+  "entities": {
+    "LeaderboardUser": {
+      "title": "LeaderboardUser",
+      "description": "Student artillery test profile and cumulative statistics",
+      "type": "object",
+      "properties": {
+        "nickname": {
+          "type": "string",
+          "maxLength": 60,
+          "description": "Student nickname or callsign"
+        },
+        "totalPoints": {
+          "type": "number",
+          "description": "Total cumulative exam points earned"
+        },
+        "singleCorrectCount": {
+          "type": "number",
+          "description": "Cumulative single choice correct count"
+        },
+        "multipleCorrectCount": {
+          "type": "number",
+          "description": "Cumulative multiple choice correct count"
+        },
+        "totalTestsTaken": {
+          "type": "number",
+          "description": "Total test sessions completed"
+        },
+        "formalExamsTaken": {
+          "type": "number",
+          "description": "Total formal mock exams taken"
+        },
+        "formalExamsPassed": {
+          "type": "number",
+          "description": "Total formal mock exams passed (>=70%)"
+        },
+        "totalWrongQuestionsCount": {
+          "type": "number",
+          "description": "Total unique wrong questions recorded"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO timestamp of user creation"
+        },
+        "lastActiveAt": {
+          "type": "string",
+          "description": "ISO timestamp of latest test submission"
+        }
+      },
+      "required": ["nickname", "totalPoints", "totalTestsTaken", "lastActiveAt"]
+    },
+    "TestSubmission": {
+      "title": "TestSubmission",
+      "description": "Record of a completed quiz session",
+      "type": "object",
+      "properties": {
+        "nickname": {
+          "type": "string",
+          "maxLength": 60,
+          "description": "Student nickname"
+        },
+        "mode": {
+          "type": "string",
+          "maxLength": 20,
+          "description": "Exam mode"
+        },
+        "modeName": {
+          "type": "string",
+          "maxLength": 60,
+          "description": "Exam mode display name"
+        },
+        "scorePercent": {
+          "type": "number",
+          "description": "Score percentage 0-100"
+        },
+        "pointsEarned": {
+          "type": "number",
+          "description": "Points earned in this session"
+        },
+        "correctCount": {
+          "type": "number",
+          "description": "Total correct count"
+        },
+        "totalQuestions": {
+          "type": "number",
+          "description": "Total questions in exam"
+        },
+        "submittedAt": {
+          "type": "string",
+          "description": "ISO timestamp when submitted"
+        }
+      },
+      "required": ["nickname", "mode", "scorePercent", "pointsEarned", "submittedAt"]
+    }
+  },
+  "firestore": {
+    "/leaderboard/{nickname}": {
+      "schema": {
+        "$ref": "#/entities/LeaderboardUser"
+      },
+      "description": "Real-time global leaderboard records keyed by student nickname"
+    },
+    "/testSubmissions/{submissionId}": {
+      "schema": {
+        "$ref": "#/entities/TestSubmission"
+      },
+      "description": "Historical log of all submitted tests"
+    }
+  }
+}

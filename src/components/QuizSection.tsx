@@ -27,11 +27,13 @@ import {
   Code,
   Users,
   Check,
-  X
+  X,
+  Cloud
 } from 'lucide-react';
 import { Question, SINGLE_QUESTIONS, MULTIPLE_QUESTIONS } from '../data/questions.ts';
 import { UserStatsManager, UserStats } from '../utils/userStats.ts';
 import { LeaderboardModal } from './LeaderboardModal.tsx';
+import { firebaseSync } from '../services/firebase.ts';
 
 interface ShuffledQuestion {
   originalQuestion: Question;
@@ -55,7 +57,15 @@ export const QuizSection: React.FC<QuizSectionProps> = ({ initialConfig, onBack 
   const [nicknameInput, setNicknameInput] = useState<string>('');
   const [isSettingNickname, setIsSettingNickname] = useState<boolean>(!UserStatsManager.getCurrentNickname());
   const [showLeaderboard, setShowLeaderboard] = useState<boolean>(false);
-  const [leaderboardTab, setLeaderboardTab] = useState<'leaderboard' | 'wrongQuestions' | 'jsonView'>('leaderboard');
+  const [leaderboardTab, setLeaderboardTab] = useState<'leaderboard' | 'wrongQuestions' | 'jsonView' | 'cloudSync'>('leaderboard');
+  const [cloudStatus, setCloudStatus] = useState(() => firebaseSync.getStatus());
+
+  useEffect(() => {
+    const unsub = firebaseSync.onStatusChange((s) => {
+      setCloudStatus({ ...firebaseSync.getStatus(), ...s });
+    });
+    return unsub;
+  }, []);
 
   // Explicit Nickname Prompt Modal before entering quiz
   const [showNicknameModal, setShowNicknameModal] = useState<boolean>(!UserStatsManager.getCurrentNickname());
@@ -322,7 +332,7 @@ export const QuizSection: React.FC<QuizSectionProps> = ({ initialConfig, onBack 
       selectedType === 'single' ? '單選題測驗' :
       selectedType === 'multiple' ? '複選題測驗' : '全題庫混合測驗';
 
-    const { pointsEarned } = UserStatsManager.recordQuizCompletion({
+    const { pointsEarned, updatedStats } = UserStatsManager.recordQuizCompletion({
       nickname: effectiveNickname,
       mode: selectedType === 'formal' ? 'formal' : (selectedType as any),
       modeName,
@@ -341,6 +351,26 @@ export const QuizSection: React.FC<QuizSectionProps> = ({ initialConfig, onBack 
       totalQuestions: total,
       scorePercent: percent
     });
+
+    // Real-time Cloud Firestore synchronization
+    try {
+      firebaseSync.syncUserToCloud(updatedStats).catch((err) => {
+        console.warn('Firebase sync notice:', err);
+      });
+      firebaseSync.recordTestSubmission({
+        nickname: effectiveNickname,
+        mode: selectedType === 'formal' ? 'formal' : (selectedType as any),
+        modeName,
+        scorePercent: percent,
+        pointsEarned,
+        correctCount: correct,
+        totalQuestions: total
+      }).catch((err) => {
+        console.warn('Firebase record submission notice:', err);
+      });
+    } catch {
+      // safe fallback
+    }
 
     setScoreResult({
       totalQuestions: total,
@@ -434,9 +464,28 @@ export const QuizSection: React.FC<QuizSectionProps> = ({ initialConfig, onBack 
             </div>
           </div>
 
-          <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+          <div className="flex items-center gap-2 w-full sm:w-auto justify-end flex-wrap">
             <button
-              onClick={() => setShowLeaderboard(true)}
+              onClick={() => {
+                setLeaderboardTab('cloudSync');
+                setShowLeaderboard(true);
+              }}
+              className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-md border ${
+                cloudStatus.isConnected
+                  ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40 hover:bg-emerald-900/80'
+                  : 'bg-stone-800 text-stone-300 border-stone-700 hover:bg-stone-750'
+              }`}
+              title="查看跨手機全連即時連線同步狀態"
+            >
+              <Cloud className={`w-4 h-4 ${cloudStatus.isConnected ? 'text-emerald-400 animate-pulse' : 'text-stone-400'}`} />
+              <span>{cloudStatus.isConnected ? '雲端即時連線 🟢' : '雲端跨手機同步 ☁️'}</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setLeaderboardTab('leaderboard');
+                setShowLeaderboard(true);
+              }}
               className="px-3.5 py-2 rounded-xl bg-stone-800 hover:bg-stone-750 text-amber-300 border border-amber-500/40 text-xs font-bold flex items-center gap-1.5 transition-all shadow-md"
             >
               <Trophy className="w-4 h-4 text-amber-400" />
