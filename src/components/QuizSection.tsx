@@ -727,7 +727,7 @@ export const QuizSection: React.FC<QuizSectionProps> = ({ initialConfig, onBack 
                     type="text"
                     required
                     autoFocus
-                    placeholder="請輸入學員暱稱（如：彈種手阿憨、發射手龍寶）..."
+                    placeholder="請輸入學員暱稱（如：信管手阿憨、發射手龍寶）..."
                     value={customNickInput}
                     onChange={(e) => setCustomNickInput(e.target.value)}
                     className="w-full px-3.5 py-2.5 rounded-xl bg-stone-950 border border-stone-700 text-sm text-stone-100 placeholder-stone-600 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500"
