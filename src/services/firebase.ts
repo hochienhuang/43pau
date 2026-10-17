@@ -235,13 +235,13 @@ class FirebaseSyncService {
 
   /**
    * Syncs a single student's updated stats to the cloud Firestore
-   * Guests (anonymous practice) are strictly kept on local storage to preserve free tier quota and prevent spam.
+   * Auto-uploaded immediately whenever ANY test is completed.
    */
   public async syncUserToCloud(user: UserStats): Promise<boolean> {
     if (!this.db) return false;
-    const sanitizedNick = user.nickname.trim();
-    if (!sanitizedNick || sanitizedNick === UserStatsManager.GUEST_NICKNAME || sanitizedNick.includes('(Guest)')) {
-      return false;
+    let sanitizedNick = user.nickname.trim();
+    if (!sanitizedNick) {
+      sanitizedNick = '匿名學員';
     }
 
     const payload = {
@@ -261,16 +261,33 @@ class FirebaseSyncService {
       await setDoc(doc(this.db, 'leaderboard', sanitizedNick), payload, { merge: true });
       this.lastSyncTime = new Date();
       this.isConnected = true;
+      this.connectionError = null;
       this.notifyStatus();
       return true;
-    } catch (err) {
+    } catch (err: any) {
+      // If database ID mismatch, fallback to (default)
+      if (this.app && (err?.code === 'not-found' || err?.message?.includes('Database not found'))) {
+        try {
+          this.db = getFirestore(this.app, '(default)');
+          await setDoc(doc(this.db, 'leaderboard', sanitizedNick), payload, { merge: true });
+          this.lastSyncTime = new Date();
+          this.isConnected = true;
+          this.connectionError = null;
+          this.notifyStatus();
+          return true;
+        } catch (innerErr) {
+          handleFirestoreError(innerErr, OperationType.WRITE, `leaderboard/${sanitizedNick}`);
+          return false;
+        }
+      }
       handleFirestoreError(err, OperationType.WRITE, `leaderboard/${sanitizedNick}`);
       return false;
     }
   }
 
   /**
-   * Records a test completion session to Firestore (skips guest submissions)
+   * Records a test completion session to Firestore
+   * Auto-uploaded immediately whenever ANY test is completed.
    */
   public async recordTestSubmission(submission: {
     nickname: string;
@@ -282,24 +299,39 @@ class FirebaseSyncService {
     totalQuestions: number;
   }): Promise<boolean> {
     if (!this.db) return false;
-    const nick = submission.nickname.trim();
-    if (!nick || nick === UserStatsManager.GUEST_NICKNAME || nick.includes('(Guest)')) {
-      return false;
-    }
+    const nick = submission.nickname.trim() || '匿名學員';
+
+    const payload = {
+      nickname: nick,
+      mode: submission.mode,
+      modeName: submission.modeName,
+      scorePercent: submission.scorePercent,
+      pointsEarned: submission.pointsEarned,
+      correctCount: submission.correctCount,
+      totalQuestions: submission.totalQuestions,
+      submittedAt: new Date().toISOString()
+    };
 
     try {
-      await addDoc(collection(this.db, 'testSubmissions'), {
-        nickname: nick,
-        mode: submission.mode,
-        modeName: submission.modeName,
-        scorePercent: submission.scorePercent,
-        pointsEarned: submission.pointsEarned,
-        correctCount: submission.correctCount,
-        totalQuestions: submission.totalQuestions,
-        submittedAt: new Date().toISOString()
-      });
+      await addDoc(collection(this.db, 'testSubmissions'), payload);
+      this.lastSyncTime = new Date();
+      this.isConnected = true;
+      this.notifyStatus();
       return true;
-    } catch (err) {
+    } catch (err: any) {
+      if (this.app && (err?.code === 'not-found' || err?.message?.includes('Database not found'))) {
+        try {
+          this.db = getFirestore(this.app, '(default)');
+          await addDoc(collection(this.db, 'testSubmissions'), payload);
+          this.lastSyncTime = new Date();
+          this.isConnected = true;
+          this.notifyStatus();
+          return true;
+        } catch (innerErr) {
+          handleFirestoreError(innerErr, OperationType.CREATE, 'testSubmissions');
+          return false;
+        }
+      }
       handleFirestoreError(err, OperationType.CREATE, 'testSubmissions');
       return false;
     }

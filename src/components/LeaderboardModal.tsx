@@ -261,7 +261,7 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
               title="點擊設定全連跨手機即時雲端同步"
             >
               <Cloud className={`w-3.5 h-3.5 ${firebaseStatus.isConnected ? 'text-emerald-400 animate-pulse' : 'text-stone-400'}`} />
-              <span>{firebaseStatus.isConnected ? '雲端即時連線中 🟢' : '雲端跨手機同步 ☁️'}</span>
+              <span>{firebaseStatus.isConnected ? '考完自動上傳 🟢' : '雲端跨手機同步 ☁️'}</span>
             </button>
 
             <button
@@ -761,7 +761,7 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
                     <p className="text-xs text-stone-400 mt-1 leading-relaxed">
                       {firebaseStatus.isConnected ? (
                         <>
-                          全連弟兄只要在任何手機上交卷，積分與排行榜將全自動<strong>即時跨手機連線同步</strong>。
+                          ⚡ <strong>【已啟用全自動即時上傳】</strong>：全連弟兄在任何手機上一按交卷，分數與考試紀錄會<strong>全自動即刻送上雲端</strong>，其他人手機排行榜即時同步，完全不需手動操作！
                           {firebaseStatus.projectId && (
                             <span className="ml-1 text-emerald-400/90 font-mono">
                               (專案: {firebaseStatus.projectId})
@@ -780,16 +780,17 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 self-stretch md:self-auto justify-end">
+                <div className="flex flex-col items-end gap-1 self-stretch md:self-auto justify-end">
                   <button
                     onClick={handlePushLocalToCloud}
                     disabled={isSyncing}
-                    className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-stone-950 font-bold text-xs flex items-center gap-1.5 transition-all shadow-md flex-1 md:flex-initial justify-center"
-                    title="將當前手機所有學員累計點數推送到雲端"
+                    className="px-3.5 py-2 rounded-xl bg-stone-800 hover:bg-stone-750 text-stone-300 hover:text-white border border-stone-700 text-xs flex items-center gap-1.5 transition-all shadow-md flex-1 md:flex-initial justify-center font-medium"
+                    title="平常交卷皆為全自動秒傳雲端；此按鈕為離線重連或換手機時手動備用"
                   >
-                    <CloudUpload className="w-4 h-4" />
-                    <span>{isSyncing ? '同步中...' : '上傳本機資料至雲端'}</span>
+                    <CloudUpload className="w-4 h-4 text-amber-400" />
+                    <span>{isSyncing ? '同步中...' : '手動補傳本機歷史（備用）'}</span>
                   </button>
+                  <span className="text-[10px] text-stone-500">平時考完試皆為自動秒傳，無須手動點擊</span>
                 </div>
               </div>
 

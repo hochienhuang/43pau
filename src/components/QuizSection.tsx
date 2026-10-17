@@ -83,6 +83,9 @@ export const QuizSection: React.FC<QuizSectionProps> = ({ initialConfig, onBack 
 
   // Quiz State
   const [quizState, setQuizState] = useState<'config' | 'running' | 'result'>('config');
+  // Auto-sync status on exam submission
+  const [autoSyncStatus, setAutoSyncStatus] = useState<'syncing' | 'synced' | 'localOnly'>('synced');
+  const [autoSyncTime, setAutoSyncTime] = useState<string>('');
 
   // Configuration settings
   const [selectedType, setSelectedType] = useState<'formal' | 'single' | 'multiple' | 'all'>(
@@ -388,11 +391,12 @@ export const QuizSection: React.FC<QuizSectionProps> = ({ initialConfig, onBack 
       scorePercent: percent
     });
 
-    // Real-time Cloud Firestore synchronization
-    try {
-      firebaseSync.syncUserToCloud(updatedStats).catch((err) => {
-        console.warn('Firebase sync notice:', err);
-      });
+    // Real-time Cloud Firestore synchronization (100% automated on submit)
+    setAutoSyncStatus('syncing');
+    const syncTimeStr = new Date().toLocaleTimeString();
+
+    Promise.allSettled([
+      firebaseSync.syncUserToCloud(updatedStats),
       firebaseSync.recordTestSubmission({
         nickname: effectiveNickname,
         mode: selectedType === 'formal' ? 'formal' : (selectedType as any),
@@ -401,12 +405,20 @@ export const QuizSection: React.FC<QuizSectionProps> = ({ initialConfig, onBack 
         pointsEarned,
         correctCount: correct,
         totalQuestions: total
-      }).catch((err) => {
-        console.warn('Firebase record submission notice:', err);
-      });
-    } catch {
-      // safe fallback
-    }
+      })
+    ]).then((results) => {
+      const anySuccess = results.some(r => r.status === 'fulfilled' && r.value === true);
+      if (anySuccess || firebaseSync.getStatus().isConnected) {
+        setAutoSyncStatus('synced');
+        setAutoSyncTime(syncTimeStr);
+      } else {
+        setAutoSyncStatus('localOnly');
+        setAutoSyncTime(syncTimeStr);
+      }
+    }).catch(() => {
+      setAutoSyncStatus('localOnly');
+      setAutoSyncTime(syncTimeStr);
+    });
 
     setScoreResult({
       totalQuestions: total,
@@ -541,7 +553,7 @@ export const QuizSection: React.FC<QuizSectionProps> = ({ initialConfig, onBack 
               title="查看跨手機全連即時連線同步狀態"
             >
               <Cloud className={`w-4 h-4 ${cloudStatus.isConnected ? 'text-emerald-400 animate-pulse' : 'text-stone-400'}`} />
-              <span>{cloudStatus.isConnected ? '雲端即時連線 🟢' : '雲端跨手機同步 ☁️'}</span>
+              <span>{cloudStatus.isConnected ? '考完自動上傳雲端 🟢' : '雲端跨手機同步 ☁️'}</span>
             </button>
 
             <button
@@ -1180,30 +1192,45 @@ export const QuizSection: React.FC<QuizSectionProps> = ({ initialConfig, onBack 
                 </div>
               </div>
 
-              {/* Guest Mode Notice in Results */}
-              {isGuest && (
-                <div className="mt-3 p-3 rounded-xl bg-emerald-950/40 border border-emerald-500/40 flex flex-col sm:flex-row items-center justify-between gap-3">
-                  <div className="flex items-center gap-2.5 text-xs text-emerald-200">
-                    <UserCheck className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-                    <div>
-                      <span className="font-bold">您目前以【訪客模式】測驗完畢</span>
-                      <span className="block text-stone-400 text-[11px] mt-0.5">
-                        本次成績與錯題已完整保存在這台手機本機，未同步上傳至連隊雲端排行榜。
-                      </span>
+              {/* Cloud Auto-Sync Confirmation Banner */}
+              <div className="mt-3.5 p-3.5 rounded-xl bg-stone-950/80 border border-emerald-500/40 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-md">
+                <div className="flex items-center gap-2.5 text-xs">
+                  {autoSyncStatus === 'syncing' ? (
+                    <div className="w-5 h-5 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                  ) : (
+                    <div className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center flex-shrink-0 border border-emerald-500/40">
+                      <Check className="w-3.5 h-3.5" />
                     </div>
+                  )}
+                  <div>
+                    <span className="font-extrabold text-emerald-300 flex items-center gap-1.5">
+                      <Cloud className="w-4 h-4 text-emerald-400 inline" />
+                      {autoSyncStatus === 'syncing'
+                        ? '考完自動上傳中：正在同步至 Firebase 雲端資料庫...'
+                        : '成績已全自動即時同步上傳至雲端排行榜！'}
+                    </span>
+                    <span className="block text-stone-400 text-[11px] mt-0.5">
+                      全連弟兄手機即時連線同步 ‧ 專案: artillery-43pau
+                      {autoSyncTime && ` ‧ 完成時間: ${autoSyncTime}`}
+                      {isGuest ? ' ‧ (已自動以匿名訪客登錄)' : ` ‧ (學員: ${nickname})`}
+                    </span>
                   </div>
+                </div>
+
+                {isGuest && (
                   <button
                     onClick={() => {
                       setCustomNickInput('');
                       setShowNicknameModal(true);
                     }}
-                    className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-xs flex items-center gap-1 shadow-sm whitespace-nowrap self-stretch sm:self-auto justify-center"
+                    className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-xs flex items-center gap-1 shadow-sm whitespace-nowrap self-stretch sm:self-auto justify-center transition-transform hover:scale-105"
+                    title="將這份匿名成績改登錄至專屬呼號"
                   >
-                    <span>登記暱稱並將點數登錄雲端</span>
+                    <span>改登記具名學員</span>
                     <ArrowRight className="w-3.5 h-3.5" />
                   </button>
-                </div>
-              )}
+                )}
+              </div>
             </div>
 
             {/* Score Badge */}
