@@ -5,6 +5,8 @@ import {
   setDoc, 
   addDoc,
   collection, 
+  query,
+  limit,
   getDocs, 
   getDocFromServer,
   onSnapshot, 
@@ -233,11 +235,14 @@ class FirebaseSyncService {
 
   /**
    * Syncs a single student's updated stats to the cloud Firestore
+   * Guests (anonymous practice) are strictly kept on local storage to preserve free tier quota and prevent spam.
    */
   public async syncUserToCloud(user: UserStats): Promise<boolean> {
     if (!this.db) return false;
     const sanitizedNick = user.nickname.trim();
-    if (!sanitizedNick) return false;
+    if (!sanitizedNick || sanitizedNick === UserStatsManager.GUEST_NICKNAME || sanitizedNick.includes('(Guest)')) {
+      return false;
+    }
 
     const payload = {
       nickname: sanitizedNick,
@@ -265,7 +270,7 @@ class FirebaseSyncService {
   }
 
   /**
-   * Records a test completion session to Firestore
+   * Records a test completion session to Firestore (skips guest submissions)
    */
   public async recordTestSubmission(submission: {
     nickname: string;
@@ -277,9 +282,14 @@ class FirebaseSyncService {
     totalQuestions: number;
   }): Promise<boolean> {
     if (!this.db) return false;
+    const nick = submission.nickname.trim();
+    if (!nick || nick === UserStatsManager.GUEST_NICKNAME || nick.includes('(Guest)')) {
+      return false;
+    }
+
     try {
       await addDoc(collection(this.db, 'testSubmissions'), {
-        nickname: submission.nickname.trim(),
+        nickname: nick,
         mode: submission.mode,
         modeName: submission.modeName,
         scorePercent: submission.scorePercent,
@@ -297,14 +307,15 @@ class FirebaseSyncService {
 
   /**
    * Subscribe to real-time leaderboard updates from Firestore.
-   * When any student submits on their device, this triggers and updates local state.
+   * Bound with limit(100) to strictly stay within Firebase Free Tier (Spark) daily read quotas.
    */
   public subscribeLeaderboard(onUpdate: (cloudList: any[]) => void): Unsubscribe | null {
     if (!this.db) return null;
 
     try {
+      const q = query(collection(this.db, 'leaderboard'), limit(100));
       const unsub = onSnapshot(
-        collection(this.db, 'leaderboard'),
+        q,
         (snapshot) => {
           const list: any[] = [];
           snapshot.forEach((docSnap) => {

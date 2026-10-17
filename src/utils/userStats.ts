@@ -39,8 +39,29 @@ export interface UserStats {
 
 const STORAGE_KEY = 'm114a1_artillery_user_stats_v1';
 const CURRENT_USER_KEY = 'm114a1_artillery_current_nickname_v1';
+const GUEST_MODE_KEY = 'm114a1_artillery_guest_mode_v1';
 
 export class UserStatsManager {
+  static readonly GUEST_NICKNAME = '匿名訪客 (Guest)';
+
+  static isGuestMode(): boolean {
+    if (typeof window === 'undefined') return false;
+    return localStorage.getItem(GUEST_MODE_KEY) === 'true';
+  }
+
+  static setGuestMode(enabled: boolean) {
+    if (typeof window === 'undefined') return;
+    localStorage.setItem(GUEST_MODE_KEY, enabled ? 'true' : 'false');
+    if (enabled) {
+      localStorage.setItem(CURRENT_USER_KEY, this.GUEST_NICKNAME);
+      this.ensureUser(this.GUEST_NICKNAME);
+    } else {
+      if (localStorage.getItem(CURRENT_USER_KEY) === this.GUEST_NICKNAME) {
+        localStorage.removeItem(CURRENT_USER_KEY);
+      }
+    }
+  }
+
   static getAllUsers(): Record<string, UserStats> {
     if (typeof window === 'undefined') return {};
     try {
@@ -70,6 +91,11 @@ export class UserStatsManager {
   static setCurrentNickname(nickname: string) {
     if (typeof window === 'undefined') return;
     const trimmed = nickname.trim();
+    if (trimmed === this.GUEST_NICKNAME) {
+      localStorage.setItem(GUEST_MODE_KEY, 'true');
+    } else {
+      localStorage.setItem(GUEST_MODE_KEY, 'false');
+    }
     localStorage.setItem(CURRENT_USER_KEY, trimmed);
     if (trimmed) {
       this.ensureUser(trimmed);
@@ -96,6 +122,53 @@ export class UserStatsManager {
       this.saveAllUsers(all);
     }
     return all[trimmed];
+  }
+
+  static migrateGuestToNickname(newNickname: string): UserStats | null {
+    const trimmed = newNickname.trim();
+    if (!trimmed || trimmed === this.GUEST_NICKNAME) return null;
+    const all = this.getAllUsers();
+    const guestUser = all[this.GUEST_NICKNAME];
+    const targetUser = this.ensureUser(trimmed);
+
+    if (guestUser && guestUser.totalPoints > 0) {
+      targetUser.totalPoints = Number((targetUser.totalPoints + guestUser.totalPoints).toFixed(1));
+      targetUser.singleCorrectCount += guestUser.singleCorrectCount;
+      targetUser.multipleCorrectCount += guestUser.multipleCorrectCount;
+      targetUser.totalTestsTaken += guestUser.totalTestsTaken;
+      targetUser.formalExamsTaken += guestUser.formalExamsTaken;
+      targetUser.formalExamsPassed += guestUser.formalExamsPassed;
+      targetUser.lastActiveAt = new Date().toISOString();
+
+      Object.entries(guestUser.wrongQuestionHistory || {}).forEach(([k, rec]) => {
+        if (!targetUser.wrongQuestionHistory[k]) {
+          targetUser.wrongQuestionHistory[k] = { ...rec };
+        } else {
+          targetUser.wrongQuestionHistory[k].missCount += rec.missCount;
+          targetUser.wrongQuestionHistory[k].lastMissedAt = rec.lastMissedAt;
+        }
+      });
+
+      all[this.GUEST_NICKNAME] = {
+        nickname: this.GUEST_NICKNAME,
+        totalPoints: 0,
+        singleCorrectCount: 0,
+        multipleCorrectCount: 0,
+        totalTestsTaken: 0,
+        formalExamsTaken: 0,
+        formalExamsPassed: 0,
+        createdAt: new Date().toISOString(),
+        lastActiveAt: new Date().toISOString(),
+        wrongQuestionHistory: {},
+        historyList: []
+      };
+    }
+
+    all[trimmed] = targetUser;
+    this.saveAllUsers(all);
+    this.setGuestMode(false);
+    this.setCurrentNickname(trimmed);
+    return targetUser;
   }
 
   static getUser(nickname: string): UserStats | null {
@@ -192,17 +265,19 @@ export class UserStatsManager {
 
   static getAllNicknames(): string[] {
     const all = this.getAllUsers();
-    return Object.keys(all);
+    return Object.keys(all).filter(n => n !== this.GUEST_NICKNAME);
   }
 
   static getLeaderboard(): (UserStats & { rank: number; totalWrongQuestionsCount: number })[] {
     const all = this.getAllUsers();
-    const sorted = Object.values(all).sort((a, b) => {
-      if (b.totalPoints !== a.totalPoints) {
-        return b.totalPoints - a.totalPoints;
-      }
-      return b.totalTestsTaken - a.totalTestsTaken;
-    });
+    const sorted = Object.values(all)
+      .filter(u => u.nickname !== this.GUEST_NICKNAME)
+      .sort((a, b) => {
+        if (b.totalPoints !== a.totalPoints) {
+          return b.totalPoints - a.totalPoints;
+        }
+        return b.totalTestsTaken - a.totalTestsTaken;
+      });
 
     return sorted.map((user, idx) => ({
       ...user,

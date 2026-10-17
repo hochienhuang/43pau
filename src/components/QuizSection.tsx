@@ -28,7 +28,8 @@ import {
   Users,
   Check,
   X,
-  Cloud
+  Cloud,
+  UserCheck
 } from 'lucide-react';
 import { Question, SINGLE_QUESTIONS, MULTIPLE_QUESTIONS } from '../data/questions.ts';
 import { UserStatsManager, UserStats } from '../utils/userStats.ts';
@@ -52,13 +53,19 @@ interface QuizSectionProps {
 }
 
 export const QuizSection: React.FC<QuizSectionProps> = ({ initialConfig, onBack }) => {
-  // User Nickname State
-  const [nickname, setNickname] = useState<string>(UserStatsManager.getCurrentNickname() || '新進砲手');
+  // User Nickname & Guest State
+  const [nickname, setNickname] = useState<string>(
+    UserStatsManager.getCurrentNickname() || (UserStatsManager.isGuestMode() ? UserStatsManager.GUEST_NICKNAME : '新進砲手')
+  );
   const [nicknameInput, setNicknameInput] = useState<string>('');
-  const [isSettingNickname, setIsSettingNickname] = useState<boolean>(!UserStatsManager.getCurrentNickname());
+  const [isSettingNickname, setIsSettingNickname] = useState<boolean>(
+    !UserStatsManager.getCurrentNickname() && !UserStatsManager.isGuestMode()
+  );
   const [showLeaderboard, setShowLeaderboard] = useState<boolean>(false);
   const [leaderboardTab, setLeaderboardTab] = useState<'leaderboard' | 'wrongQuestions' | 'jsonView' | 'cloudSync'>('leaderboard');
   const [cloudStatus, setCloudStatus] = useState(() => firebaseSync.getStatus());
+
+  const isGuest = UserStatsManager.isGuestMode() || nickname === UserStatsManager.GUEST_NICKNAME;
 
   useEffect(() => {
     const unsub = firebaseSync.onStatusChange((s) => {
@@ -67,8 +74,10 @@ export const QuizSection: React.FC<QuizSectionProps> = ({ initialConfig, onBack 
     return unsub;
   }, []);
 
-  // Explicit Nickname Prompt Modal before entering quiz
-  const [showNicknameModal, setShowNicknameModal] = useState<boolean>(!UserStatsManager.getCurrentNickname());
+  // Explicit Nickname Prompt Modal before entering quiz (never auto-open if in Guest mode)
+  const [showNicknameModal, setShowNicknameModal] = useState<boolean>(
+    !UserStatsManager.getCurrentNickname() && !UserStatsManager.isGuestMode()
+  );
   const [customNickInput, setCustomNickInput] = useState<string>('');
   const [pendingQuizStart, setPendingQuizStart] = useState<Question[] | null | 'default'>(null);
 
@@ -145,7 +154,15 @@ export const QuizSection: React.FC<QuizSectionProps> = ({ initialConfig, onBack 
 
   const handleConfirmNicknameModal = (chosenNick: string) => {
     const finalNick = chosenNick.trim() || '砲兵戰士';
-    UserStatsManager.setCurrentNickname(finalNick);
+    // If migrating from guest mode, transfer all points and sync to cloud
+    if (isGuest) {
+      const migrated = UserStatsManager.migrateGuestToNickname(finalNick);
+      if (migrated) {
+        firebaseSync.syncUserToCloud(migrated).catch(() => {});
+      }
+    } else {
+      UserStatsManager.setCurrentNickname(finalNick);
+    }
     setNickname(finalNick);
     setShowNicknameModal(false);
 
@@ -153,6 +170,20 @@ export const QuizSection: React.FC<QuizSectionProps> = ({ initialConfig, onBack 
       const override = pendingQuizStart === 'default' ? undefined : pendingQuizStart;
       setPendingQuizStart(null);
       executeStartQuiz(override);
+    }
+  };
+
+  const handleStartAsGuest = () => {
+    UserStatsManager.setGuestMode(true);
+    setNickname(UserStatsManager.GUEST_NICKNAME);
+    setShowNicknameModal(false);
+
+    if (pendingQuizStart) {
+      const override = pendingQuizStart === 'default' ? undefined : pendingQuizStart;
+      setPendingQuizStart(null);
+      executeStartQuiz(override);
+    } else {
+      executeStartQuiz();
     }
   };
 
@@ -166,6 +197,11 @@ export const QuizSection: React.FC<QuizSectionProps> = ({ initialConfig, onBack 
   };
 
   const startQuiz = (overrideQuestions?: Question[]) => {
+    // If already in Guest mode, start immediately without prompt!
+    if (UserStatsManager.isGuestMode() || nickname === UserStatsManager.GUEST_NICKNAME) {
+      executeStartQuiz(overrideQuestions);
+      return;
+    }
     const activeNick = UserStatsManager.getCurrentNickname();
     if (!activeNick || activeNick === '新進砲手') {
       setPendingQuizStart(overrideQuestions || 'default');
@@ -425,8 +461,25 @@ export const QuizSection: React.FC<QuizSectionProps> = ({ initialConfig, onBack 
             </div>
             <div className="flex-1">
               <div className="text-xs text-stone-400">當前測考學員</div>
-              {!isSettingNickname ? (
-                <div className="flex items-center gap-2">
+              {isGuest ? (
+                <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                  <span className="px-2.5 py-0.5 rounded-lg bg-emerald-950/80 text-emerald-300 border border-emerald-600/40 text-xs font-bold flex items-center gap-1.5 shadow-sm">
+                    <UserCheck className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>訪客模式 (Guest)</span>
+                  </span>
+                  <span className="text-xs text-stone-400">（免輸入暱稱，本地暢快刷題）</span>
+                  <button
+                    onClick={() => {
+                      setCustomNickInput('');
+                      setShowNicknameModal(true);
+                    }}
+                    className="text-xs text-amber-400 hover:underline font-bold ml-1"
+                  >
+                    登記正式學員
+                  </button>
+                </div>
+              ) : !isSettingNickname ? (
+                <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                   <span className="text-base font-bold text-stone-100">{nickname}</span>
                   {currentUserStats && (
                     <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-amber-950 text-amber-300 border border-amber-800">
@@ -441,6 +494,16 @@ export const QuizSection: React.FC<QuizSectionProps> = ({ initialConfig, onBack 
                     className="text-xs text-amber-400 hover:underline ml-1"
                   >
                     更改
+                  </button>
+                  <button
+                    onClick={() => {
+                      UserStatsManager.setGuestMode(true);
+                      setNickname(UserStatsManager.GUEST_NICKNAME);
+                    }}
+                    className="text-[11px] px-2 py-0.5 rounded-md bg-stone-800 hover:bg-stone-750 text-stone-400 hover:text-stone-200 border border-stone-700 ml-1 transition-colors"
+                    title="切換成訪客免暱稱模式"
+                  >
+                    切為訪客模式
                   </button>
                 </div>
               ) : (
@@ -837,6 +900,22 @@ export const QuizSection: React.FC<QuizSectionProps> = ({ initialConfig, onBack 
                   </button>
                 </div>
               </form>
+
+              {/* Guest Mode Direct Access */}
+              <div className="pt-2 border-t border-stone-800/80 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] text-stone-500">不想輸入暱稱？可選擇：</span>
+                  <span className="text-[10px] text-emerald-400/80 font-mono">免填寫 ‧ 本地練習</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleStartAsGuest}
+                  className="w-full py-2.5 px-4 rounded-xl bg-emerald-950/40 hover:bg-emerald-900/50 text-emerald-300 hover:text-emerald-200 border border-emerald-600/40 text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition-all shadow-md group"
+                >
+                  <UserCheck className="w-4 h-4 text-emerald-400 transition-transform group-hover:scale-110" />
+                  <span>以【訪客模式】直接開始（免輸入暱稱）</span>
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -1100,6 +1179,31 @@ export const QuizSection: React.FC<QuizSectionProps> = ({ initialConfig, onBack 
                   )}
                 </div>
               </div>
+
+              {/* Guest Mode Notice in Results */}
+              {isGuest && (
+                <div className="mt-3 p-3 rounded-xl bg-emerald-950/40 border border-emerald-500/40 flex flex-col sm:flex-row items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5 text-xs text-emerald-200">
+                    <UserCheck className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                    <div>
+                      <span className="font-bold">您目前以【訪客模式】測驗完畢</span>
+                      <span className="block text-stone-400 text-[11px] mt-0.5">
+                        本次成績與錯題已完整保存在這台手機本機，未同步上傳至連隊雲端排行榜。
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setCustomNickInput('');
+                      setShowNicknameModal(true);
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-xs flex items-center gap-1 shadow-sm whitespace-nowrap self-stretch sm:self-auto justify-center"
+                  >
+                    <span>登記暱稱並將點數登錄雲端</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Score Badge */}

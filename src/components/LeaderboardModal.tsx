@@ -793,6 +793,63 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
                 </div>
               </div>
 
+              {/* Free Tier Quotas & User Limits Explanation Card */}
+              <div className="rounded-2xl bg-stone-900/90 border border-emerald-500/30 p-5 space-y-3.5 shadow-lg">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2 text-stone-100 font-bold text-sm">
+                    <ShieldCheck className="w-5 h-5 text-emerald-400" />
+                    <span>Firebase 免費額度上限與使用人數說明（Spark 免費方案）</span>
+                  </div>
+                  <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800 font-semibold font-mono">
+                    100% 永久免費 ‧ 零超額扣款風險
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-center">
+                  <div className="p-3 rounded-xl bg-stone-950/70 border border-stone-800">
+                    <div className="text-[11px] text-stone-400">同時在線人數</div>
+                    <div className="text-base font-extrabold text-emerald-400 font-mono mt-0.5">1,000,000</div>
+                    <div className="text-[10px] text-stone-500 mt-0.5">高達百萬連線</div>
+                  </div>
+                  <div className="p-3 rounded-xl bg-stone-950/70 border border-stone-800">
+                    <div className="text-[11px] text-stone-400">每日免費讀取</div>
+                    <div className="text-base font-extrabold text-cyan-400 font-mono mt-0.5">50,000 次</div>
+                    <div className="text-[10px] text-stone-500 mt-0.5">每天自動歸零</div>
+                  </div>
+                  <div className="p-3 rounded-xl bg-stone-950/70 border border-stone-800">
+                    <div className="text-[11px] text-stone-400">每日免費寫入</div>
+                    <div className="text-base font-extrabold text-amber-400 font-mono mt-0.5">20,000 次</div>
+                    <div className="text-[10px] text-stone-500 mt-0.5">每天自動歸零</div>
+                  </div>
+                  <div className="p-3 rounded-xl bg-stone-950/70 border border-stone-800">
+                    <div className="text-[11px] text-stone-400">雲端儲存空間</div>
+                    <div className="text-base font-extrabold text-purple-400 font-mono mt-0.5">1 GiB</div>
+                    <div className="text-[10px] text-stone-500 mt-0.5">可存破百萬筆</div>
+                  </div>
+                </div>
+
+                <div className="text-xs text-stone-300 space-y-1.5 leading-relaxed bg-stone-950/50 p-3.5 rounded-xl border border-stone-800">
+                  <div className="flex items-start gap-2">
+                    <span className="text-emerald-400 font-bold">● 人數上限換算：</span>
+                    <span className="text-stone-300">
+                      Firebase 官方<strong>不限使用人數</strong>，而是計算讀寫次數。全連 120 弟兄就算每人每天測驗 10 次（1,200 次交卷），整天寫入量也才佔免費額度的 <strong>6%</strong>，部隊使用綽綽有餘！
+                    </span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <span className="text-amber-400 font-bold">● 系統防護機制：</span>
+                    <span className="text-stone-300">
+                      已啟用 <strong>Top 100 查詢上限保護</strong> 與本地快取，杜絕浪費讀取。達到當日上限時 Google 會自動保護暫停請求，<strong>絕不需綁定信用卡，完全零超支費用</strong>。
+                    </span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <span className="text-cyan-400 font-bold">● 訪客模式 (Guest)：</span>
+                    <span className="text-stone-300">
+                      弟兄練習若不想輸入暱稱，可使用「訪客模式」直接做題，成績保留於本機瀏覽器，完全不消耗雲端資料庫額度！
+                    </span>
+                  </div>
+                </div>
+              </div>
+
               {/* Instructions and Firebase Configuration Form */}
               <div className="rounded-2xl bg-stone-850/60 border border-stone-800 p-5 space-y-4">
                 <div className="flex items-center justify-between flex-wrap gap-2">
