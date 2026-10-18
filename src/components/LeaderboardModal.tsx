@@ -36,7 +36,7 @@ interface LeaderboardModalProps {
   onClose: () => void;
   currentNickname: string;
   onSwitchNickname: (newNickname: string) => void;
-  onStartRetest: (questions: Question[]) => void;
+  onStartRetest: (questions: Question[], asMakeup?: boolean) => void;
   initialTab?: 'leaderboard' | 'wrongQuestions' | 'jsonView' | 'cloudSync';
 }
 
@@ -169,7 +169,7 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
       explanation: m.explanation
     }));
     onClose();
-    onStartRetest(questions);
+    onStartRetest(questions, true);
   };
 
   const handlePushLocalToCloud = async () => {
@@ -245,7 +245,7 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
                 </span>
               </div>
               <p className="text-xs text-stone-400 mt-0.5">
-                單選答對 <strong>+1 分</strong> ‧ 多選答對 <strong>+1.5 分</strong>（只計算答對題數持續累積）‧ 錯題次數統計
+                單選答對 <strong>+1 分</strong> ‧ 複選答對 <strong>+2 分</strong> ‧ 補測驗補對 <strong>+0.5 / +1 分</strong>（持續累積）‧ 錯題次數統計
               </p>
             </div>
           </div>
@@ -556,12 +556,27 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
                 {missedList.length > 0 && (
                   <button
                     onClick={handlePracticeAllWrong}
-                    className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-lg shadow-rose-950/40 transition-all hover:scale-102"
+                    className="px-4 py-2 rounded-xl bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-lg shadow-rose-950/40 transition-all hover:scale-102"
                   >
-                    <Flame className="w-4 h-4" />
-                    <span>針對歷史錯題啟動特訓 ({missedList.length}題)</span>
+                    <Flame className="w-4 h-4 text-amber-300" />
+                    <span>啟動錯題補測驗 (補對享 +0.5 / +1 分獎勵) ({missedList.length}題)</span>
                   </button>
                 )}
+              </div>
+
+              {/* Continuous Recording Notice */}
+              <div className="p-3 rounded-xl bg-stone-900/80 border border-stone-800 text-xs text-stone-300 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold text-[11px] border border-amber-500/30">
+                    歷史錯題持續累積
+                  </span>
+                  <span className="text-stone-400 text-[11px]">
+                    錯題永久完整保留於錯題本供反覆複習，補測答對即享補錯獎勵 (+0.5/+1分)，不會從錯題本中消除！
+                  </span>
+                </div>
+                <span className="text-amber-400 font-mono font-bold text-xs shrink-0">
+                  共 {missedList.length} 題
+                </span>
               </div>
 
               {filteredMissedList.length === 0 ? (
@@ -582,6 +597,11 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
                           <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-rose-950 text-rose-300 border border-rose-800 font-mono">
                             累計答錯 {item.missCount} 次
                           </span>
+                          {item.retestSuccessCount && item.retestSuccessCount > 0 ? (
+                            <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-emerald-950/80 text-emerald-300 border border-emerald-700/80 font-mono flex items-center gap-1">
+                              ✓ 補測已答對 ({item.retestSuccessCount}次獲補錯獎勵)
+                            </span>
+                          ) : null}
                           <span className="text-xs px-2 py-0.5 rounded bg-stone-800 text-stone-300 border border-stone-700">
                             {item.type === 'single' ? '單選題' : '複選題'}
                           </span>

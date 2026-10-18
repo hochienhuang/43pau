@@ -1,4 +1,5 @@
 import { initializeApp, getApps, getApp, type FirebaseApp } from 'firebase/app';
+import { getAuth, signInAnonymously } from 'firebase/auth';
 import { 
   getFirestore, 
   doc, 
@@ -143,6 +144,14 @@ class FirebaseSyncService {
         this.app = initializeApp(config);
       }
       this.db = getFirestore(this.app, config.firestoreDatabaseId || '(default)');
+      try {
+        const auth = getAuth(this.app);
+        if (!auth.currentUser) {
+          signInAnonymously(auth).catch(() => {});
+        }
+      } catch {
+        // Auth is optional since rules permit public access
+      }
       this.testConnection();
       return true;
     } catch (e: any) {

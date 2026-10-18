@@ -80,6 +80,8 @@ export const QuizSection: React.FC<QuizSectionProps> = ({ initialConfig, onBack 
   );
   const [customNickInput, setCustomNickInput] = useState<string>('');
   const [pendingQuizStart, setPendingQuizStart] = useState<Question[] | null | 'default'>(null);
+  const [pendingIsMakeup, setPendingIsMakeup] = useState<boolean>(false);
+  const [isMakeupMode, setIsMakeupMode] = useState<boolean>(false);
 
   // Quiz State
   const [quizState, setQuizState] = useState<'config' | 'running' | 'result'>('config');
@@ -113,6 +115,7 @@ export const QuizSection: React.FC<QuizSectionProps> = ({ initialConfig, onBack 
     multipleCorrect: number;
     pointsEarned: number;
     scorePercent: number;
+    isMakeup?: boolean;
     wrongQuestions: {
       questionIndex: number;
       question: Question;
@@ -171,8 +174,10 @@ export const QuizSection: React.FC<QuizSectionProps> = ({ initialConfig, onBack 
 
     if (pendingQuizStart) {
       const override = pendingQuizStart === 'default' ? undefined : pendingQuizStart;
+      const asMakeup = pendingIsMakeup;
       setPendingQuizStart(null);
-      executeStartQuiz(override);
+      setPendingIsMakeup(false);
+      executeStartQuiz(override, asMakeup);
     }
   };
 
@@ -183,8 +188,10 @@ export const QuizSection: React.FC<QuizSectionProps> = ({ initialConfig, onBack 
 
     if (pendingQuizStart) {
       const override = pendingQuizStart === 'default' ? undefined : pendingQuizStart;
+      const asMakeup = pendingIsMakeup;
       setPendingQuizStart(null);
-      executeStartQuiz(override);
+      setPendingIsMakeup(false);
+      executeStartQuiz(override, asMakeup);
     } else {
       executeStartQuiz();
     }
@@ -194,28 +201,31 @@ export const QuizSection: React.FC<QuizSectionProps> = ({ initialConfig, onBack 
     setShowNicknameModal(false);
     const wasPending = !!pendingQuizStart;
     setPendingQuizStart(null);
+    setPendingIsMakeup(false);
     if (!wasPending && onBack) {
       onBack();
     }
   };
 
-  const startQuiz = (overrideQuestions?: Question[]) => {
+  const startQuiz = (overrideQuestions?: Question[], asMakeup = false) => {
     // If already in Guest mode, start immediately without prompt!
     if (UserStatsManager.isGuestMode() || nickname === UserStatsManager.GUEST_NICKNAME) {
-      executeStartQuiz(overrideQuestions);
+      executeStartQuiz(overrideQuestions, asMakeup);
       return;
     }
     const activeNick = UserStatsManager.getCurrentNickname();
     if (!activeNick || activeNick === '新進砲手') {
       setPendingQuizStart(overrideQuestions || 'default');
+      setPendingIsMakeup(asMakeup);
       setCustomNickInput(activeNick && activeNick !== '新進砲手' ? activeNick : '');
       setShowNicknameModal(true);
       return;
     }
-    executeStartQuiz(overrideQuestions);
+    executeStartQuiz(overrideQuestions, asMakeup);
   };
 
-  const executeStartQuiz = (overrideQuestions?: Question[]) => {
+  const executeStartQuiz = (overrideQuestions?: Question[], asMakeup = false) => {
+    setIsMakeupMode(asMakeup);
     let selectedPool: Question[] = [];
 
     if (overrideQuestions) {
@@ -337,6 +347,11 @@ export const QuizSection: React.FC<QuizSectionProps> = ({ initialConfig, onBack 
       correctAnswers: number[];
     }[] = [];
 
+    const resolvedList: {
+      questionId: number;
+      type: 'single' | 'multiple';
+    }[] = [];
+
     questions.forEach((qItem, idx) => {
       const originalQ = qItem.originalQuestion;
       const userSel = (userAnswers[idx] || []).slice().sort((a, b) => a - b);
@@ -352,6 +367,10 @@ export const QuizSection: React.FC<QuizSectionProps> = ({ initialConfig, onBack 
         } else {
           multipleCorrect++;
         }
+        resolvedList.push({
+          questionId: originalQ.id,
+          type: originalQ.type
+        });
       } else {
         wrongList.push({
           questionIndex: idx,
@@ -364,34 +383,67 @@ export const QuizSection: React.FC<QuizSectionProps> = ({ initialConfig, onBack 
 
     const total = questions.length;
     const percent = Math.round((correct / total) * 100);
-
-    // Record stats to localStorage & update leaderboard (單選 +1, 多選 +1.5, 累積)
     const effectiveNickname = nickname.trim() || '砲兵戰士';
-    const modeName = selectedType === 'formal' ? '國軍正式模擬考 (30題)' :
-      selectedType === 'single' ? '單選題測驗' :
-      selectedType === 'multiple' ? '複選題測驗' : '全題庫混合測驗';
 
-    const { pointsEarned, updatedStats } = UserStatsManager.recordQuizCompletion({
-      nickname: effectiveNickname,
-      mode: selectedType === 'formal' ? 'formal' : (selectedType as any),
-      modeName,
-      singleCorrect,
-      multipleCorrect,
-      wrongQuestions: wrongList.map(w => ({
-        questionId: w.question.id,
-        type: w.question.type,
-        questionText: w.question.question,
-        options: w.question.options,
-        correctAnswers: w.question.correctAnswers,
-        source: w.question.source,
-        difficulty: w.question.difficulty,
-        explanation: w.question.explanation
-      })),
-      totalQuestions: total,
-      scorePercent: percent
-    });
+    let pointsEarned = 0;
+    let updatedStats: UserStats;
+    let modeName = '';
+    let modeKey: string = selectedType;
 
-    // Real-time Cloud Firestore synchronization (100% automated on submit)
+    if (isMakeupMode) {
+      // 考完補測驗：單選題補對加 0.5 分，複選題補對加 1 分回來當補錯獎勵
+      modeName = '錯題補測驗 (補錯獎勵)';
+      modeKey = 'makeup';
+      const makeupRes = UserStatsManager.recordMakeupCompletion({
+        nickname: effectiveNickname,
+        singleCorrect,
+        multipleCorrect,
+        resolvedQuestions: resolvedList,
+        wrongQuestions: wrongList.map(w => ({
+          questionId: w.question.id,
+          type: w.question.type,
+          questionText: w.question.question,
+          options: w.question.options,
+          correctAnswers: w.question.correctAnswers,
+          source: w.question.source,
+          difficulty: w.question.difficulty,
+          explanation: w.question.explanation
+        })),
+        totalQuestions: total
+      });
+      pointsEarned = makeupRes.bonusPointsEarned;
+      updatedStats = makeupRes.updatedStats;
+    } else {
+      // 正規測驗計分：單選題 1 分，複選題 2 分
+      modeName = selectedType === 'formal' ? '國軍正式模擬考 (30題)' :
+        selectedType === 'single' ? '單選題測驗' :
+        selectedType === 'multiple' ? '複選題測驗' : '全題庫混合測驗';
+      modeKey = selectedType === 'formal' ? 'formal' : (selectedType as any);
+
+      const quizRes = UserStatsManager.recordQuizCompletion({
+        nickname: effectiveNickname,
+        mode: selectedType === 'formal' ? 'formal' : (selectedType as any),
+        modeName,
+        singleCorrect,
+        multipleCorrect,
+        wrongQuestions: wrongList.map(w => ({
+          questionId: w.question.id,
+          type: w.question.type,
+          questionText: w.question.question,
+          options: w.question.options,
+          correctAnswers: w.question.correctAnswers,
+          source: w.question.source,
+          difficulty: w.question.difficulty,
+          explanation: w.question.explanation
+        })),
+        totalQuestions: total,
+        scorePercent: percent
+      });
+      pointsEarned = quizRes.pointsEarned;
+      updatedStats = quizRes.updatedStats;
+    }
+
+    // 100% 全自動即時同步上傳至 Firebase 雲端資料庫（完全不需手動上傳）
     setAutoSyncStatus('syncing');
     const syncTimeStr = new Date().toLocaleTimeString();
 
@@ -399,7 +451,7 @@ export const QuizSection: React.FC<QuizSectionProps> = ({ initialConfig, onBack 
       firebaseSync.syncUserToCloud(updatedStats),
       firebaseSync.recordTestSubmission({
         nickname: effectiveNickname,
-        mode: selectedType === 'formal' ? 'formal' : (selectedType as any),
+        mode: modeKey,
         modeName,
         scorePercent: percent,
         pointsEarned,
@@ -428,6 +480,7 @@ export const QuizSection: React.FC<QuizSectionProps> = ({ initialConfig, onBack 
       multipleCorrect,
       pointsEarned,
       scorePercent: percent,
+      isMakeup: isMakeupMode,
       wrongQuestions: wrongList
     });
 
@@ -437,7 +490,7 @@ export const QuizSection: React.FC<QuizSectionProps> = ({ initialConfig, onBack 
   const handleRetestWrong = () => {
     if (!scoreResult || scoreResult.wrongQuestions.length === 0) return;
     const wrongOriginalQuestions = scoreResult.wrongQuestions.map(w => w.question);
-    startQuiz(wrongOriginalQuestions);
+    startQuiz(wrongOriginalQuestions, true); // true = makeup mode!
   };
 
   const formatTime = (secs: number) => {
@@ -663,7 +716,7 @@ export const QuizSection: React.FC<QuizSectionProps> = ({ initialConfig, onBack 
                       30 題
                     </span>
                   </div>
-                  <p className="text-xs text-stone-400">自主練習複選題（答對每題 +1.5 分）</p>
+                  <p className="text-xs text-stone-400">自主練習複選題（答對每題 +2 分）</p>
                 </button>
 
                 <button
@@ -964,8 +1017,16 @@ export const QuizSection: React.FC<QuizSectionProps> = ({ initialConfig, onBack 
               第 <span className="text-amber-400 text-lg font-mono">{currentIndex + 1}</span> / {questions.length} 題
             </span>
             <span className="text-xs px-2.5 py-0.5 rounded-full bg-stone-800 text-stone-300 border border-stone-700">
-              {q.type === 'single' ? '單選題 (答對+1分)' : '複選題 (答對+1.5分)'}
+              {isMakeupMode
+                ? (q.type === 'single' ? '單選題 (補對獎勵+0.5分)' : '複選題 (補對獎勵+1分)')
+                : (q.type === 'single' ? '單選題 (答對+1分)' : '複選題 (答對+2分)')}
             </span>
+            {isMakeupMode && (
+              <span className="text-xs px-2.5 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/40 font-bold flex items-center gap-1">
+                <RotateCcw className="w-3 h-3 text-rose-400" />
+                <span>錯題補測驗 (補錯加分模式)</span>
+              </span>
+            )}
             <span className={`text-xs px-2 py-0.5 rounded-full border ${
               q.difficulty === '易' ? 'bg-emerald-950 text-emerald-300 border-emerald-800' :
               q.difficulty === '中' ? 'bg-amber-950 text-amber-300 border-amber-800' :
@@ -1182,10 +1243,24 @@ export const QuizSection: React.FC<QuizSectionProps> = ({ initialConfig, onBack 
                   ★
                 </div>
                 <div className="text-xs text-stone-200">
-                  本次測驗獲得：<strong className="text-amber-400 text-sm font-mono font-bold">+{scoreResult.pointsEarned}</strong> 點數！
-                  （單選答對 {scoreResult.singleCorrect} 題 × 1分 + 複選答對 {scoreResult.multipleCorrect} 題 × 1.5分）
+                  {scoreResult.isMakeup ? (
+                    <>
+                      <span className="font-bold text-amber-300">【錯題補測驗成果】</span>
+                      成功補回獎勵點數：<strong className="text-amber-400 text-sm font-mono font-bold">+{scoreResult.pointsEarned}</strong> 分！
+                      <span className="block text-stone-300 text-[11px] mt-0.5">
+                        （單選補對 {scoreResult.singleCorrect} 題 × 0.5分 + 複選補對 {scoreResult.multipleCorrect} 題 × 1分）‧ 歷史錯題本將持續完整保留記錄，不會被消除
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      本次測驗獲得：<strong className="text-amber-400 text-sm font-mono font-bold">+{scoreResult.pointsEarned}</strong> 點數！
+                      <span className="block text-stone-300 text-[11px] mt-0.5">
+                        （單選答對 {scoreResult.singleCorrect} 題 × 1分 + 複選答對 {scoreResult.multipleCorrect} 題 × 2分）
+                      </span>
+                    </>
+                  )}
                   {latestUser && (
-                    <span className="block text-[11px] text-stone-400 mt-0.5">
+                    <span className="block text-[11px] text-stone-400 mt-1">
                       個人累計總點數：<strong className="text-amber-300 font-mono">{latestUser.totalPoints}</strong> 分
                     </span>
                   )}
@@ -1249,10 +1324,10 @@ export const QuizSection: React.FC<QuizSectionProps> = ({ initialConfig, onBack 
               {scoreResult.wrongQuestions.length > 0 && (
                 <button
                   onClick={handleRetestWrong}
-                  className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs sm:text-sm shadow-md transition-colors flex items-center gap-1.5"
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-bold text-xs sm:text-sm shadow-md transition-all flex items-center gap-1.5 hover:scale-102"
                 >
                   <RotateCcw className="w-4 h-4" />
-                  <span>僅重測本次錯題 ({scoreResult.wrongQuestions.length}題)</span>
+                  <span>啟動錯題補測驗 ({scoreResult.wrongQuestions.length}題，補對享 +0.5 / +1 分獎勵)</span>
                 </button>
               )}
 
@@ -1466,7 +1541,7 @@ export const QuizSection: React.FC<QuizSectionProps> = ({ initialConfig, onBack 
             UserStatsManager.setCurrentNickname(newNick);
             setNickname(newNick);
           }}
-          onStartRetest={(questions) => startQuiz(questions)}
+          onStartRetest={(questions, asMakeup) => startQuiz(questions, asMakeup ?? true)}
         />
       </div>
     );

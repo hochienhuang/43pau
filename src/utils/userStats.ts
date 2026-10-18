@@ -10,6 +10,8 @@ export interface MissedQuestionRecord {
   source: string;
   difficulty: string;
   explanation?: string;
+  retestSuccessCount?: number; // 補測答對次數 (持續記錄保留在錯題本中，不自動消除)
+  lastRetestedAt?: string;
 }
 
 export interface TestHistoryEntry {
@@ -199,8 +201,8 @@ export class UserStatsManager {
     const user = this.ensureUser(trimmed);
 
     // Scoring rule per user request:
-    // 單選題答對一題 1 分，多選題 1.5 分，持續累積
-    const pointsEarned = Number((params.singleCorrect * 1.0 + params.multipleCorrect * 1.5).toFixed(1));
+    // 單選題答對一題 1 分，複選題 2 分，持續累積
+    const pointsEarned = Number((params.singleCorrect * 1.0 + params.multipleCorrect * 2.0).toFixed(1));
 
     user.totalPoints = Number((user.totalPoints + pointsEarned).toFixed(1));
     user.singleCorrectCount += params.singleCorrect;
@@ -263,6 +265,109 @@ export class UserStatsManager {
     return { pointsEarned, updatedStats: user };
   }
 
+  /**
+   * Records a makeup test (錯題補測驗) session.
+   * Per user request:
+   * 1. 計分方式：單選題補對一題補回 +0.5 分，複選題補對一題補回 +1.0 分作為補錯獎勵。
+   * 2. 錯題本規則：「補測中答對的題目不會自動從個人歷史錯題本中消除，這個不會，會持續記錄」！
+   *    題目完整保留在錯題本中供隨時查看與反覆複習，標記補測成功次數與最後補測時間。
+   */
+  static recordMakeupCompletion(params: {
+    nickname: string;
+    singleCorrect: number;
+    multipleCorrect: number;
+    resolvedQuestions: { questionId: number; type: 'single' | 'multiple' }[];
+    wrongQuestions?: {
+      questionId: number;
+      type: 'single' | 'multiple';
+      questionText: string;
+      options: string[];
+      correctAnswers: number[];
+      source: string;
+      difficulty: string;
+      explanation?: string;
+    }[];
+    totalQuestions: number;
+  }): { bonusPointsEarned: number; updatedStats: UserStats } {
+    const trimmed = params.nickname.trim();
+    const user = this.ensureUser(trimmed);
+
+    // Makeup bonus: 單選 +0.5 分，複選 +1 分
+    const bonusPointsEarned = Number((params.singleCorrect * 0.5 + params.multipleCorrect * 1.0).toFixed(1));
+
+    user.totalPoints = Number((user.totalPoints + bonusPointsEarned).toFixed(1));
+    user.singleCorrectCount += params.singleCorrect;
+    user.multipleCorrectCount += params.multipleCorrect;
+    user.totalTestsTaken += 1;
+    user.lastActiveAt = new Date().toISOString();
+
+    const now = new Date().toISOString();
+
+    // 依使用者需求：補測答對的題目「不會從個人歷史錯題本中消除，會持續記錄」！
+    if (!user.wrongQuestionHistory) {
+      user.wrongQuestionHistory = {};
+    }
+    params.resolvedQuestions.forEach((rq) => {
+      const key = `${rq.type}_${rq.questionId}`;
+      if (user.wrongQuestionHistory[key]) {
+        // 保留在錯題本中，累加補測答對次數與更新時間，絕不刪除
+        user.wrongQuestionHistory[key].retestSuccessCount =
+          (user.wrongQuestionHistory[key].retestSuccessCount || 0) + 1;
+        user.wrongQuestionHistory[key].lastRetestedAt = now;
+      }
+    });
+
+    // 若補測中仍有做錯的題目，持續累計錯題次數
+    if (params.wrongQuestions) {
+      params.wrongQuestions.forEach((wq) => {
+        const key = `${wq.type}_${wq.questionId}`;
+        if (user.wrongQuestionHistory[key]) {
+          user.wrongQuestionHistory[key].missCount += 1;
+          user.wrongQuestionHistory[key].lastMissedAt = now;
+        } else {
+          user.wrongQuestionHistory[key] = {
+            key,
+            questionId: wq.questionId,
+            type: wq.type,
+            questionText: wq.questionText,
+            options: wq.options,
+            correctAnswers: wq.correctAnswers,
+            missCount: 1,
+            lastMissedAt: now,
+            source: wq.source,
+            difficulty: wq.difficulty,
+            explanation: wq.explanation,
+            retestSuccessCount: 0
+          };
+        }
+      });
+    }
+
+    const totalCorrect = params.singleCorrect + params.multipleCorrect;
+    const percent = params.totalQuestions > 0 ? Math.round((totalCorrect / params.totalQuestions) * 100) : 100;
+
+    user.historyList.unshift({
+      id: `makeup_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      mode: 'makeup' as any,
+      modeName: '錯題補測驗 (補錯獎勵)',
+      scorePercent: percent,
+      pointsEarned: bonusPointsEarned,
+      correctCount: totalCorrect,
+      totalQuestions: params.totalQuestions,
+      date: now
+    });
+
+    if (user.historyList.length > 50) {
+      user.historyList = user.historyList.slice(0, 50);
+    }
+
+    const all = this.getAllUsers();
+    all[trimmed] = user;
+    this.saveAllUsers(all);
+
+    return { bonusPointsEarned, updatedStats: user };
+  }
+
   static getAllNicknames(): string[] {
     const all = this.getAllUsers();
     return Object.keys(all).filter(n => n !== this.GUEST_NICKNAME);
@@ -301,14 +406,16 @@ export class UserStatsManager {
       exportedAt: new Date().toISOString(),
       scoringRules: {
         singleChoicePoints: 1.0,
-        multipleChoicePoints: 1.5,
-        pointsPolicy: '持續累積 (單選答對 1 分，多選答對 1.5 分，不扣分)'
+        multipleChoicePoints: 2.0,
+        makeupSingleBonusPoints: 0.5,
+        makeupMultipleBonusPoints: 1.0,
+        pointsPolicy: '持續累積 (單選答對 1 分，複選答對 2 分；考完補測驗補對單選 +0.5 分、複選 +1 分補錯獎勵)'
       },
       formalExamStandard: {
         singleCount: 20,
         multipleCount: 10,
         totalQuestions: 30,
-        maxPoints: 35.0,
+        maxPoints: 40.0,
         passingScorePercent: 70
       },
       summary: {
